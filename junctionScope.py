@@ -1453,54 +1453,52 @@ def count_barcode_read_totals(
 		result.to_csv(output_path, sep="\t", index=False)
 	return result
 
-
+# CD45_jxn_names=[j["junction_name"] for j in jxn_list]
+# ideal input file output from 2nd step summary function: <project name>_fullJxn_bcd_summary.tsv
 def isoform_prop(
 	data: pd.DataFrame,
 	jxn_names: tuple,
 	gene: str,
+	label_iso_as: str = None,
+	label_threshhold: float = 0.8,
 	output_file: str = None
 ) -> pd.DataFrame:
 	if output_file is None:
-		output_file = os.path.join(f"{gene}_isoformProp_bcd_summary.tsv")
+		output_path = os.path.join(f"{gene}_isoformProp_bcd_summary.tsv")
 	else:
 		output_path = Path(output_file).resolve()
 		output_path.parent.mkdir(parents=True, exist_ok=True)
-	data_cols = data.columns
+	data_in = data.copy()
+	data_cols = data_in.columns
 	jxn_dict = {}
 	for jxn in jxn_names:
 		jxn_dict[jxn] = [f"{jxn}_reads",f"{jxn}_seq_reads"]
-	
-	read_cols = [item + "_reads" for item in jxn_names]
-	seq_read_cols = [item + "_seq_reads" for item in jxn_names]
-	data[f"{gene}_supporting_reads_per_barcode"] = data[read_cols].sum(axis=1)
-	data[f"{gene}_supporting_seq_reads_per_barcode"] = data[seq_read_cols].sum(axis=1)
-	for c in read_cols:
-		data[f"{gene}_pct_supporting_reads_of_total"] = (
+	data_in[f"{gene}_supporting_reads_per_barcode"] = data_in[[v[0] for v in jxn_dict.values()]].sum(axis=1)
+	data_in[f"{gene}_supporting_seq_reads_per_barcode"] = data_in[[v[1] for v in jxn_dict.values()]].sum(axis=1)
+	for j,r in jxn_dict.items():
+		data_in[f"{j}_pct_supporting_reads_of_total"] = (
 			100
-			* data[c]
-			/ data[f"{gene}_supporting_reads_per_barcode"]
+			* data_in[r[0]]
+			/ data_in[f"{gene}_supporting_reads_per_barcode"]
 		).fillna(0).round(6)
-		data[f"{gene}_pct_supporting_seq_reads_of_total"] = (
+		data_in[f"{j}_pct_supporting_seq_reads_of_total"] = (
 			100
-			* data[c]
-			/ data[f"{gene}_supporting_seq_reads_per_barcode"]
+			* data_in[r[1]]
+			/ data_in[f"{gene}_supporting_seq_reads_per_barcode"]
 		).fillna(0).round(6)
-		
-	data[f"{gene}_pct_supporting_reads_of_total"] = (
-		100
-		* data[f"{gene}_supporting_reads_per_barcode"]
-		/ data["total_reads_per_barcode"]
-	).fillna(0).round(6)
-	data[f"{gene}_pct_supporting_seq_reads_of_total"] = (
-		100
-		* data[f"{gene}_supporting_seq_reads_per_barcode"]
-		/ data["total_reads_per_barcode"]
-	).fillna(0).round(6)
-	if output_file is not None:
-		data.to_csv(output_path, sep="\t", index=False)
-	return(data)
+	if label_iso_as is not None:
+		if not label_threshhold > 0 and not label_threshhold <= 1:
+			raise ValueError("label_threshhold must be greater than 0 and less than or equal to 1")
+		cols_to_check_r = [f"{k}_pct_supporting_reads_of_total" for k in jxn_dict.keys()]
+		cols_to_check_rs = [f"{k}_pct_supporting_seq_reads_of_total" for k in jxn_dict.keys()]
+		data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_reads"] = (data_in[cols_to_check_r] > label_threshhold*100).idxmax(axis=1)
+		data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_reads"] = data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_reads"].str.replace('_pct_supporting_reads_of_total', '', regex=False)
+		data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_seq_reads"] = (data_in[cols_to_check_rs] > label_threshhold*100).idxmax(axis=1)
+		data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_seq_reads"] = data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_seq_reads"].str.replace('_pct_supporting_seq_reads_of_total', '', regex=False)
+	if output_path is not None:
+		data_in.to_csv(output_path, sep="\t", index=False)
+	return(data_in)
 
-	
 
 
 
