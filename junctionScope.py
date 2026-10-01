@@ -441,21 +441,19 @@ def get_nt_seq(region: str, fasta: str, window: int = 5, rev_comp: bool = False)
 			fa.references,
 			source_label=f"FASTA {fasta}",
 		)
-
 		left_seq = fa.fetch(
 			resolved_chrom,
 			left_start,
 			left_end,
 		)
-
 		right_seq = fa.fetch(
 			resolved_chrom,
 			right_start,
 			right_end,
 		)
 	# with pysam.FastaFile(fasta) as fa:
-	# 	left_seq  = fa.fetch(chrom, left_start, left_end)
-	# 	right_seq = fa.fetch(chrom, right_start, right_end)
+	#   left_seq  = fa.fetch(chrom, left_start, left_end)
+	#   right_seq = fa.fetch(chrom, right_start, right_end)
 	seq = (left_seq + right_seq).upper()
 	if rev_comp:
 		seq = seq.translate(str.maketrans("ACGTacgt", "TGCAtgca"))[::-1]
@@ -528,23 +526,23 @@ def gene_region_from_gtf(gtf_file: str, chrom: str) -> str:
 # =============================================================================
 
 # def extract_jxn_region(
-# 	input_file: str,
-# 	region: str,
-# 	output_sam: str,
-# 	buffer: int = 200,
-# 	threads: int = 1,
+#   input_file: str,
+#   region: str,
+#   output_sam: str,
+#   buffer: int = 200,
+#   threads: int = 1,
 # ):
-# 	"""
-# 	Subset a BAM/CRAM to a buffered region and write a SAM file.
-# 	Auto-detects BAM vs CRAM from file suffix.
-# 	"""
-# 	suff = Path(input_file).suffix.lower()
-# 	mode = "rb" if suff == ".bam" else "rc"
-# 	buffered = add_buffer(region, buffer)
-# 	with pysam.AlignmentFile(input_file, mode, threads=threads) as bam, \
-# 		 pysam.AlignmentFile(output_sam, "w", header=bam.header) as out:
-# 		for read in bam.fetch(region=buffered):
-# 			out.write(read)
+#   """
+#   Subset a BAM/CRAM to a buffered region and write a SAM file.
+#   Auto-detects BAM vs CRAM from file suffix.
+#   """
+#   suff = Path(input_file).suffix.lower()
+#   mode = "rb" if suff == ".bam" else "rc"
+#   buffered = add_buffer(region, buffer)
+#   with pysam.AlignmentFile(input_file, mode, threads=threads) as bam, \
+#        pysam.AlignmentFile(output_sam, "w", header=bam.header) as out:
+#       for read in bam.fetch(region=buffered):
+#           out.write(read)
 
 
 def extract_jxn_region(
@@ -779,9 +777,9 @@ def filter_to_junction(
 			)
 		]
 		# parsed_sam_coord = parsed_sam[
-		# 							(parsed_sam[chr_col] == chrom) &
-		# 							(parsed_sam[start_col].between(start-buffer,start+buffer)) &
-		# 							(parsed_sam[end_col].between(end-buffer,end+buffer))]
+		#                           (parsed_sam[chr_col] == chrom) &
+		#                           (parsed_sam[start_col].between(start-buffer,start+buffer)) &
+		#                           (parsed_sam[end_col].between(end-buffer,end+buffer))]
 		if filter_barcodes or mode == 'bulk':
 			return pd.DataFrame(parsed_sam_coord)
 		else:
@@ -1191,7 +1189,7 @@ def select_best_junction(
 	if df.empty:
 		df = pd.DataFrame(columns=df.columns)
 		#raise ValueError(
-		#	"No junctions pass filtering criteria."
+		#   "No junctions pass filtering criteria."
 		#)
 	else:
 		if mode == 'sc':
@@ -1344,6 +1342,165 @@ def count_sample_stats(
 		'Percent with Junction':pct_junc_col
 	}
 	return(qc_dict)
+
+def count_barcode_read_totals(
+	input_file: str,
+	sample_name: str = None,
+	threads: int = 1,
+	bcd_tag: str = None,
+	umi_tag: str = None,
+	reference_fasta: str = None,
+	require_umi: bool = True,
+	output_file: str = None,
+) -> pd.DataFrame:
+	"""
+	Count primary mapped reads for each cell barcode across an entire
+	BAM/CRAM file.
+	By default, a read must contain both a valid barcode and UMI because
+	that matches the current eligibility rules in parse_sam_per_junction().
+	Returns
+	-------
+	pandas.DataFrame
+		cell_barcode
+		sample_name, when supplied
+		total_reads_per_barcode
+		total_spliced_reads_per_barcode
+	"""
+	suffix = Path(input_file).suffix.lower()
+	if suffix == ".bam":
+		input_mode = "rb"
+	elif suffix == ".cram":
+		input_mode = "rc"
+	else:
+		raise ValueError("input_file must end in .bam or .cram")
+	barcode_tag = str(bcd_tag).strip() if bcd_tag is not None else ""
+	umi_tag_value = str(umi_tag).strip() if umi_tag is not None else ""
+	barcode_tags = [barcode_tag] if barcode_tag else BARCODE_TAGS
+	umi_tags = [umi_tag_value] if umi_tag_value else UMI_TAGS
+	barcode_counts = defaultdict(
+		lambda: {
+			"total_reads_per_barcode": 0,
+			"total_spliced_reads_per_barcode": 0,
+		}
+	)
+	open_kwargs = {"threads": threads}
+	if reference_fasta:
+		open_kwargs["reference_filename"] = reference_fasta
+	with pysam.AlignmentFile(
+		input_file,
+		input_mode,
+		**open_kwargs,
+	) as bam:
+		for read in bam.fetch(until_eof=True):
+			# Keep primary mapped alignments only.
+			if (
+				read.is_unmapped
+				or read.is_secondary
+				or read.is_supplementary
+				or not read.cigartuples
+			):
+				continue
+			barcode_result = get_first_tag(read, barcode_tags)
+			barcode = (
+				barcode_result[1]
+				if barcode_result is not None
+				else None
+			)
+			if not _valid_tag_value(barcode):
+				continue
+			if require_umi:
+				umi_result = get_first_tag(read, umi_tags)
+				umi = (
+					umi_result[1]
+					if umi_result is not None
+					else None
+				)
+				if not _valid_tag_value(umi):
+					continue
+			barcode = str(barcode)
+			barcode_counts[barcode][
+				"total_reads_per_barcode"
+			] += 1
+			if any(operation == 3 for operation, _ in read.cigartuples):
+				barcode_counts[barcode][
+					"total_spliced_reads_per_barcode"
+				] += 1
+	rows = [
+		{
+			"cell_barcode": barcode,
+			**counts,
+		}
+		for barcode, counts in barcode_counts.items()
+	]
+	result = pd.DataFrame(
+		rows,
+		columns=[
+			"cell_barcode",
+			"total_reads_per_barcode",
+			"total_spliced_reads_per_barcode",
+		],
+	)
+	if sample_name is not None:
+		result.insert(1, "sample_name", str(sample_name))
+	if not result.empty:
+		result = result.sort_values(
+			"total_reads_per_barcode",
+			ascending=False,
+		).reset_index(drop=True)
+	if output_file is not None:
+		output_path = Path(output_file).resolve()
+		output_path.parent.mkdir(parents=True, exist_ok=True)
+		result.to_csv(output_path, sep="\t", index=False)
+	return result
+
+
+def isoform_prop(
+	data: pd.DataFrame,
+	jxn_names: tuple,
+	gene: str,
+	output_file: str = None
+) -> pd.DataFrame:
+	if output_file is None:
+		output_file = os.path.join(f"{gene}_isoformProp_bcd_summary.tsv")
+	else:
+		output_path = Path(output_file).resolve()
+		output_path.parent.mkdir(parents=True, exist_ok=True)
+	data_cols = data.columns
+	jxn_dict = {}
+	for jxn in jxn_names:
+		jxn_dict[jxn] = [f"{jxn}_reads",f"{jxn}_seq_reads"]
+	
+	read_cols = [item + "_reads" for item in jxn_names]
+	seq_read_cols = [item + "_seq_reads" for item in jxn_names]
+	data[f"{gene}_supporting_reads_per_barcode"] = data[read_cols].sum(axis=1)
+	data[f"{gene}_supporting_seq_reads_per_barcode"] = data[seq_read_cols].sum(axis=1)
+	for c in read_cols:
+		data[f"{gene}_pct_supporting_reads_of_total"] = (
+			100
+			* data[c]
+			/ data[f"{gene}_supporting_reads_per_barcode"]
+		).fillna(0).round(6)
+		data[f"{gene}_pct_supporting_seq_reads_of_total"] = (
+			100
+			* data[c]
+			/ data[f"{gene}_supporting_seq_reads_per_barcode"]
+		).fillna(0).round(6)
+		
+	data[f"{gene}_pct_supporting_reads_of_total"] = (
+		100
+		* data[f"{gene}_supporting_reads_per_barcode"]
+		/ data["total_reads_per_barcode"]
+	).fillna(0).round(6)
+	data[f"{gene}_pct_supporting_seq_reads_of_total"] = (
+		100
+		* data[f"{gene}_supporting_seq_reads_per_barcode"]
+		/ data["total_reads_per_barcode"]
+	).fillna(0).round(6)
+	if output_file is not None:
+		data.to_csv(output_path, sep="\t", index=False)
+	return(data)
+
+	
 
 
 
@@ -1503,7 +1660,8 @@ def extract_jxn_regtools(
 			["regtools", "--version"], capture_output=True, text=True
 		)
 		lines = ver.stderr.splitlines() + ver.stdout.splitlines()
-		ver_str = next((l.split()[1] for l in lines if l.strip()), "0.0.0")
+		#ver_str = next((l.split()[1] for l in lines if l.strip()), "0.0.0")
+		ver_str = next((l.split()[1] for l in lines if l.strip().startswith("Version")), "0.0.0")
 		major = int(ver_str.split(".")[0])
 	except Exception:
 		major = 0
@@ -1578,7 +1736,8 @@ def get_jxn_counts_gene(reg_anno: pd.DataFrame, gene: str) -> dict:
 		(reg_anno.get("known_donor",    1) == 1) &
 		(reg_anno.get("known_acceptor", 1) == 1) &
 		(reg_anno.get("known_junction", 1) == 1) &
-		(reg_anno["genes"] == gene)
+		(reg_anno.get("gene_names",  "NA") == gene) #&
+		#(reg_anno["genes"] == gene)
 	)
 	sub = reg_anno[mask]
 	scores = sub["score_regtools"] if "score_regtools" in sub.columns else sub["score"]
@@ -1840,11 +1999,11 @@ def add_loom_intron_exon_ratio(
 		)
 		adata.var_names_make_unique()
 	# adata = sc.read_loom(
-	# 	str(loom_path),
-	# 	sparse=True,
-	# 	X_name="spliced",
-	# 	obs_names="CellID",
-	# 	var_names="Gene",
+	#   str(loom_path),
+	#   sparse=True,
+	#   X_name="spliced",
+	#   obs_names="CellID",
+	#   var_names="Gene",
 	# )
 	layer_map = {
 		str(layer_name).lower(): layer_name
@@ -2188,7 +2347,8 @@ def write_empty_result(
 
 
 
-step_n = 1
+step_n = 0
+empty_summ_trigg = 0
 
 def run_sample_junction(
 	sample: str,
@@ -2234,7 +2394,11 @@ def run_sample_junction(
 	step_count = step_count+1 if use_regtools else step_count
 	#step_count = step_count+1 if qc_step else step_count
 	global step_n
-	step_n = 1
+	global empty_summ_trigg
+	step_n = 0
+	empty_summ_trigg = 0
+	sam_summ = pd.DataFrame()
+	matched = pd.DataFrame()
 	if mode != 'sc' and mode != 'bulk':
 		print("[run_sample_junction] 'mode' argument not found ...")
 		print("[run_sample_junction] mode = 'sc' for single-cell data with barcodes")
@@ -2251,131 +2415,11 @@ def run_sample_junction(
 	# Base path prefix for all intermediate files for this sample × junction
 	base = os.path.join(output_dir, f"{sample}.{jxn_name}")
 	# ------------------------------------------------------------------
-	# 1. Extract region → SAM
-	# ------------------------------------------------------------------
-	region_sam = f"{base}.region.sam"
-	print(f"  [{step_n}/{step_count}] Extracting region {jxncoord} ...")
-	step_n += 1
-	extract_jxn_region(bam_file, jxncoord, region_sam,
-		buffer=config_func['extract_jxn_region'].get('buffer',200),
-		threads=threads) # bug7
-	# ------------------------------------------------------------------
-	# 2. Parse SAM to DataFrame
-	# ------------------------------------------------------------------
-	print(f"  [{step_n}/{step_count}] Parsing SAM ...")
-	step_n += 1
-	parsed = parse_sam_per_junction(region_sam, mode)
-	if is_empty(parsed):
-		print("[EMPTY] Parsed SAM is empty. Writing NA result.")
-		return write_empty_result(
-			sample, gene, jxn_name, gene_region, jxncoord,
-			nt_seq, base, mode, use_regtools
-		)
-	parsed.to_csv(f"{base}.region.parsed.tsv", sep="\t", index=False)
-	# ------------------------------------------------------------------
-	# 3. Filter to junction coordinates + sequence check
-	# ------------------------------------------------------------------
-	print(f"  [{step_n}/{step_count}] Filtering to junction coordinates ...")
-	step_n += 1
-	filtered = filter_to_junction(parsed, jxncoord, mode,
-		buffer=config_func['filter_to_junction'].get('buffer',2),
-		filter_barcodes=config_func['filter_to_junction'].get('filter_barcodes',False))
-	filtered = seq_check(filtered, nt_seq,
-		filter_rows=config_func['seq_check'].get('filter_rows',False),
-		case_sensitive=config_func['seq_check'].get('case_sensitive',False))
-	if is_empty(filtered):
-		print("[EMPTY] Filtered junction table is empty. Writing NA result.")
-		return write_empty_result(
-			sample, gene, jxn_name, gene_region, jxncoord,
-			nt_seq, base, mode, use_regtools
-		)
-	filtered.to_csv(f"{base}.region.filtered.tsv", sep="\t", index=False)
-	# ------------------------------------------------------------------
-	# 4. Summarise — sample level and per-barcode level
-	# ------------------------------------------------------------------
-	print(f"  [{step_n}/{step_count}] Summarising junctions ...")
-	step_n += 1
-	sam_summ    = summ_junc(filtered, mode)
-	if is_empty(sam_summ):
-		print("[EMPTY] Junction summary is empty. Writing NA result.")
-		return write_empty_result(
-			sample, gene, jxn_name, gene_region, jxncoord,
-			nt_seq, base, mode, use_regtools
-		)
-	sam_summ.to_csv(f"{base}.sam.jxn.summ.tsv", sep="\t", index=False)
-	#if len(sam_summ) > 1:
-	# now get the 'best' junction no matter what, even if only 1 option and print out result and save to best'
-	best = select_best_junction(sam_summ, mode = mode,
-		min_reads=config_func['select_best_junction'].get('min_reads',5),
-		min_seq_reads=config_func['select_best_junction'].get('min_seq_reads',1))
-	if best.empty:
-		sam_jxn_coord = "NA"
-		read_count     = 0
-		seq_read_count = 0
-		pct_reads_seq  = 0.0
-	else:
-		top_bulk = best.iloc[0]
-		best_chr = top_bulk["chromosome"]
-		best_str = top_bulk["junction_start"]
-		best_end = top_bulk["junction_end"]
-		sam_jxn_coord = f"{best_chr}:{int(best_str)}-{int(best_end)}"
-		read_count     = int(top_bulk["sam_read_count"])
-		seq_read_count = int(top_bulk["seq_read_count"])
-		pct_reads_seq  = round(float(top_bulk["pct_reads_seq"]), 4)
-	best.to_csv(f"{base}.sam.jxn.best.summ.tsv", sep="\t", index=False)
-	if mode == 'sc':
-		bcd_summ    = summ_junc_bybcd(filtered)
-		bcd_summ.to_csv(f"{base}.sam.jxn.bcd.summ.tsv", sep="\t", index=False)
-		# Best junction from SAM method
-		if best.empty:
-			sam_jxn_coord   = "NA"
-			read_count      = 0
-			seq_read_count  = 0
-			pct_reads_seq   = 0.0
-			cell_count      = 0
-			seq_cell_count  = 0
-			pct_cells_seq   = 0.0
-			umi_count       = 0
-			seq_umi_count   = 0
-			pct_umi_seq     = 0.0
-			bcd_summ_best   = pd.DataFrame()
-		else:
-			top = best.iloc[0]
-			sam_jxn_coord  = f"{top['chromosome']}:{int(top['junction_start'])}-{int(top['junction_end'])}"
-			read_count     = int(top["sam_read_count"])
-			seq_read_count = int(top["seq_read_count"])
-			pct_reads_seq  = round(float(top["pct_reads_seq"]), 4)
-			cell_count     = int(top["sam_n_cells"])
-			seq_cell_count = int(top["seq_n_cells"])
-			pct_cells_seq  = round(float(top["pct_cells_seq"]), 4)
-			umi_count      = int(top["sam_n_umi"])
-			seq_umi_count  = int(top["seq_n_umi"])
-			pct_umi_seq    = round(float(top["pct_umi_seq"]), 4)
-			# Per-barcode subset for the best junction
-			bcd_summ_best = bcd_summ[
-				(bcd_summ["chromosome"]     == top["chromosome"]) &
-				(bcd_summ["junction_start"] == top["junction_start"]) &
-				(bcd_summ["junction_end"]   == top["junction_end"])
-			].copy()
-			bcd_summ_best.to_csv(f"{base}.sam.jxn.bcd.best.tsv", sep="\t", index=False)
-	# QC --------------------
-	# if qc_step:
-	# 	print(f"  [{step_n}/{step_count}] Sample QC {jxncoord} ...")
-	# 	step_n += 1
-	# 	qc_dict = count_sample_stats(
-	# 		input_file = bam_file,
-	# 		mode = mode,
-	# 		verbose = True,
-	# 		threads = threads,
-	# 		reference_fasta = fasta
-	# 	)
-	# 	sample_junc_qc(best,qc_dict,f"{base}.jxn.qc.tsv",mode)
-	# ------------------------------------------------------------------
 	# 5. regtools extract + annotate (gene-level)
 	# ------------------------------------------------------------------
 	if regtools and validate_regtools():
-		print(f"  [{step_n}/{step_count}] Running regtools ...")
 		step_n += 1
+		print(f"  [{step_n}/{step_count}] Running regtools ...")
 		reg_bed  = f"{base}.gene.bed"
 		reg_anno = f"{base}.gene.bed.anno"
 		extract_jxn_regtools(bam_file, gene_region, reg_bed,
@@ -2384,39 +2428,198 @@ def run_sample_junction(
 		reg_df = read_anno_as_df(reg_anno)
 		# Match SAM summary to regtools annotation
 		reg_jxn_coord = "NA"
-		if not sam_summ.empty and not reg_df.empty:
-			merged = match_sam_to_regtools(sam_summ, reg_df,
-				coord_tol=config_func['match_sam_to_regtools'].get('coord_tol',1))
-			merged.to_csv(f"{base}.sam_reg.merged.tsv", sep="\t", index=False)
-			# Best regtools match: closest coordinate to the SAM best junction
-			matched = merged[merged["junction_match"]]
+		# if not sam_summ.empty and not reg_df.empty:
+		#     merged = match_sam_to_regtools(sam_summ, reg_df,
+		#         coord_tol=config_func['match_sam_to_regtools'].get('coord_tol',1))
+		#     merged.to_csv(f"{base}.sam_reg.merged.tsv", sep="\t", index=False)
+		#     # Best regtools match: closest coordinate to the SAM best junction
+		#     matched = merged[merged["junction_match"]]
 		# Gene-level junction summary from regtools
 		gene_summ = get_jxn_counts_gene(reg_df, gene)
+	while empty_summ_trigg < 1:
+		# ------------------------------------------------------------------
+		# 1. Extract region → SAM
+		# ------------------------------------------------------------------
+		region_sam = f"{base}.region.sam"
+		step_n += 1
+		print(f"  [{step_n}/{step_count}] Extracting region {jxncoord} ...")
+		extract_jxn_region(bam_file, jxncoord, region_sam,
+			buffer=config_func['extract_jxn_region'].get('buffer',200),
+			threads=threads) # bug7
+		# ------------------------------------------------------------------
+		# 2. Parse SAM to DataFrame
+		# -----------------------------------------------------------------
+		step_n += 1
+		print(f"  [{step_n}/{step_count}] Parsing SAM ...")
+		parsed = parse_sam_per_junction(region_sam, mode)
+		if is_empty(parsed):
+			print("[EMPTY] Parsed SAM is empty. Writing NA result.")
+			empty_summ_trigg += 1
+			break
+			# return write_empty_result(
+			#     sample, gene, jxn_name, gene_region, jxncoord,
+			#     nt_seq, base, mode, use_regtools
+			# )
+		parsed.to_csv(f"{base}.region.parsed.tsv", sep="\t", index=False)
+		# ------------------------------------------------------------------
+		# 3. Filter to junction coordinates + sequence check
+		# ------------------------------------------------------------------
+		step_n += 1
+		print(f"  [{step_n}/{step_count}] Filtering to junction coordinates ...")
+		filtered = filter_to_junction(parsed, jxncoord, mode,
+			buffer=config_func['filter_to_junction'].get('buffer',2),
+			filter_barcodes=config_func['filter_to_junction'].get('filter_barcodes',False))
+		filtered = seq_check(filtered, nt_seq,
+			filter_rows=config_func['seq_check'].get('filter_rows',False),
+			case_sensitive=config_func['seq_check'].get('case_sensitive',False))
+		if is_empty(filtered):
+			print("[EMPTY] Filtered junction table is empty. Writing NA result.")
+			empty_summ_trigg += 1
+			break
+			# return write_empty_result(
+			#     sample, gene, jxn_name, gene_region, jxncoord,
+			#     nt_seq, base, mode, use_regtools
+			# )
+		filtered.to_csv(f"{base}.region.filtered.tsv", sep="\t", index=False)
+		# ------------------------------------------------------------------
+		# 4. Summarise — sample level and per-barcode level
+		# ------------------------------------------------------------------
+		step_n += 1
+		print(f"  [{step_n}/{step_count}] Summarising junctions ...")
+		sam_summ    = summ_junc(filtered, mode)
+		if is_empty(sam_summ):
+			print("[EMPTY] Junction summary is empty. Writing NA result.")
+			empty_summ_trigg += 1
+			break
+			# return write_empty_result(
+			#     sample, gene, jxn_name, gene_region, jxncoord,
+			#     nt_seq, base, mode, use_regtools
+			# )
+		sam_summ.to_csv(f"{base}.sam.jxn.summ.tsv", sep="\t", index=False)
+		#if len(sam_summ) > 1:
+		# now get the 'best' junction no matter what, even if only 1 option and print out result and save to best'
+		best = select_best_junction(sam_summ, mode = mode,
+			min_reads=config_func['select_best_junction'].get('min_reads',5),
+			min_seq_reads=config_func['select_best_junction'].get('min_seq_reads',1))
+		if best.empty:
+			sam_jxn_coord = "NA"
+			read_count     = 0
+			seq_read_count = 0
+			pct_reads_seq  = 0.0
+		else:
+			top_bulk = best.iloc[0]
+			best_chr = top_bulk["chromosome"]
+			best_str = top_bulk["junction_start"]
+			best_end = top_bulk["junction_end"]
+			sam_jxn_coord = f"{best_chr}:{int(best_str)}-{int(best_end)}"
+			read_count     = int(top_bulk["sam_read_count"])
+			seq_read_count = int(top_bulk["seq_read_count"])
+			pct_reads_seq  = round(float(top_bulk["pct_reads_seq"]), 4)
+		best.to_csv(f"{base}.sam.jxn.best.summ.tsv", sep="\t", index=False)
+		if mode == 'sc':
+			bcd_summ    = summ_junc_bybcd(filtered)
+			bcd_summ.to_csv(f"{base}.sam.jxn.bcd.summ.tsv", sep="\t", index=False)
+			# Best junction from SAM method
+			if best.empty:
+				sam_jxn_coord   = "NA"
+				read_count      = 0
+				seq_read_count  = 0
+				pct_reads_seq   = 0.0
+				cell_count      = 0
+				seq_cell_count  = 0
+				pct_cells_seq   = 0.0
+				umi_count       = 0
+				seq_umi_count   = 0
+				pct_umi_seq     = 0.0
+				bcd_summ_best   = pd.DataFrame()
+			else:
+				top = best.iloc[0]
+				sam_jxn_coord  = f"{top['chromosome']}:{int(top['junction_start'])}-{int(top['junction_end'])}"
+				read_count     = int(top["sam_read_count"])
+				seq_read_count = int(top["seq_read_count"])
+				pct_reads_seq  = round(float(top["pct_reads_seq"]), 4)
+				cell_count     = int(top["sam_n_cells"])
+				seq_cell_count = int(top["seq_n_cells"])
+				pct_cells_seq  = round(float(top["pct_cells_seq"]), 4)
+				umi_count      = int(top["sam_n_umi"])
+				seq_umi_count  = int(top["seq_n_umi"])
+				pct_umi_seq    = round(float(top["pct_umi_seq"]), 4)
+				# Per-barcode subset for the best junction
+				bcd_summ_best = bcd_summ[
+					(bcd_summ["chromosome"]     == top["chromosome"]) &
+					(bcd_summ["junction_start"] == top["junction_start"]) &
+					(bcd_summ["junction_end"]   == top["junction_end"])
+				].copy()
+				bcd_summ_best.to_csv(f"{base}.sam.jxn.bcd.best.tsv", sep="\t", index=False)
+	# QC --------------------
+	# if qc_step:
+	#   print(f"  [{step_n}/{step_count}] Sample QC {jxncoord} ...")
+	#   step_n += 1
+	#   qc_dict = count_sample_stats(
+	#       input_file = bam_file,
+	#       mode = mode,
+	#       verbose = True,
+	#       threads = threads,
+	#       reference_fasta = fasta
+	#   )
+	#   sample_junc_qc(best,qc_dict,f"{base}.jxn.qc.tsv",mode)
+	# ------------------------------------------------------------------
+	# 5. regtools extract + annotate (gene-level)
+	# ------------------------------------------------------------------
+	# if regtools and validate_regtools():
+	#     print(f"  [{step_n}/{step_count}] Running regtools ...")
+	#     step_n += 1
+	#     reg_bed  = f"{base}.gene.bed"
+	#     reg_anno = f"{base}.gene.bed.anno"
+	#     extract_jxn_regtools(bam_file, gene_region, reg_bed,
+	#         buffer=config_func['extract_jxn_regtools'].get('buffer',1000))
+	#     annotate_jxn_regtools(reg_bed, fasta, gtf, reg_anno)
+	#     reg_df = read_anno_as_df(reg_anno)
+	#     # Match SAM summary to regtools annotation
+	#     reg_jxn_coord = "NA"
+	#     if not sam_summ.empty and not reg_df.empty:
+	#         merged = match_sam_to_regtools(sam_summ, reg_df,
+	#             coord_tol=config_func['match_sam_to_regtools'].get('coord_tol',1))
+	#         merged.to_csv(f"{base}.sam_reg.merged.tsv", sep="\t", index=False)
+	#         # Best regtools match: closest coordinate to the SAM best junction
+	#         matched = merged[merged["junction_match"]]
+	#     # Gene-level junction summary from regtools
+	#     gene_summ = get_jxn_counts_gene(reg_df, gene)
 	# ------------------------------------------------------------------
 	# 6. Assemble result row
 	# ------------------------------------------------------------------
-	print(f"  [{step_n}/{step_count}] Writing result ...")
-	step_n += 1
-	base_result = {
-		"sample":                   sample,
-		"gene":                     gene,
-		"jxn_name":                 jxn_name,
-		"target_gene_coord":        gene_region,
-		"targetJxn_coord":          jxncoord,
-		"samtools_jxn_coord":       sam_jxn_coord,
-		"nt_sequence":              nt_seq,
-		"targetJxn_read_count":     read_count,
-		"targetJxn_seq_read_count": seq_read_count,
-		"pct_reads_seq":            pct_reads_seq
-	}
-	if mode == 'sc':
-		base_result.update({
-		"targetJxn_cell_count":     cell_count,
-		"targetJxn_seq_cell_count": seq_cell_count,
-		"pct_cells_seq":            pct_cells_seq,
-		"targetJxn_umi_count":      umi_count,
-		"targetJxn_seq_umi_count":  seq_umi_count,
-		"pct_umi_seq":              pct_umi_seq})
+	print(f"  [{step_count}/{step_count}] Writing result ...")
+	cols = get_output_columns(mode, use_regtools)
+	base_result = {col: pd.NA for col in cols}
+	base_result.update({
+		"sample": sample,
+		"gene": gene,
+		"jxn_name": jxn_name,
+		"target_gene_coord": gene_region,
+		"targetJxn_coord": jxncoord,
+		"nt_sequence": nt_seq,
+	})
+	#step_n += 1
+	# base_result = {
+	#     "sample":                   sample,
+	#     "gene":                     gene,
+	#     "jxn_name":                 jxn_name,
+	#     "target_gene_coord":        gene_region,
+	#     "targetJxn_coord":          jxncoord,
+	#     "samtools_jxn_coord":       sam_jxn_coord,
+	#     "nt_sequence":              nt_seq,
+	#     "targetJxn_read_count":     read_count,
+	#     "targetJxn_seq_read_count": seq_read_count,
+	#     "pct_reads_seq":            pct_reads_seq
+	# }
+	# if mode == 'sc':
+	#     base_result.update({
+	#     "targetJxn_cell_count":     cell_count,
+	#     "targetJxn_seq_cell_count": seq_cell_count,
+	#     "pct_cells_seq":            pct_cells_seq,
+	#     "targetJxn_umi_count":      umi_count,
+	#     "targetJxn_seq_umi_count":  seq_umi_count,
+	#     "pct_umi_seq":              pct_umi_seq})
 	if regtools and validate_regtools():
 		base_result.update({
 		"geneJxn_count_mean":       gene_summ["mean_val"],
@@ -2425,11 +2628,13 @@ def run_sample_junction(
 		"geneJxn_count_sum":        gene_summ["sum_val"],
 		"geneJxn_counts":           gene_summ["counts"],
 		"geneJxn_transcripts":      gene_summ["transcript_ids"]})
-		# matched may be unbound if sam_summ or reg_df was empty
-		if 'matched' not in dir():
-			matched = pd.DataFrame()
-		if matched.empty and regtools and validate_regtools():
-			# No coordinate match — one row with NA regtools coord
+		if not sam_summ.empty and not reg_df.empty:
+			merged = match_sam_to_regtools(sam_summ, reg_df,
+				coord_tol=config_func['match_sam_to_regtools'].get('coord_tol',1))
+			merged.to_csv(f"{base}.sam_reg.merged.tsv", sep="\t", index=False)
+			# Best regtools match: closest coordinate to the SAM best junction
+			matched = merged[merged["junction_match"]]
+		if matched.empty:
 			results = [{**base_result, "regtools_jxn_coord": "NA"}]
 		else:
 			results = []
@@ -2445,13 +2650,32 @@ def run_sample_junction(
 					if col not in base_result and col != "regtools_jxn_coord"
 				}
 				results.append({**base_result, "regtools_jxn_coord": reg_coord, **extra})
+		# matched may be unbound if sam_summ or reg_df was empty
+		# if 'matched' not in dir():
+		#     matched = pd.DataFrame()
+		# if matched.empty and regtools and validate_regtools():
+		#     # No coordinate match — one row with NA regtools coord
+		#     results = [{**base_result, "regtools_jxn_coord": "NA"}]
+		# else:
+		#     results = []
+		#     for _, r in matched.iterrows():
+		#         reg_coord = (
+		#             f"{r['chromosome']}:"
+		#             f"{int(r['junction_start_reg'])}-{int(r['junction_end_reg'])}"
+		#         )
+		#         # Pull in extra regtools columns not already in base_result
+		#         extra = {
+		#             col: r[col]
+		#             for col in matched.columns
+		#             if col not in base_result and col != "regtools_jxn_coord"
+		#         }
+		#         results.append({**base_result, "regtools_jxn_coord": reg_coord, **extra})
 	else:
 		# regtools unavailable — single row, no gene-level stats
 		results = [{**base_result}]
 	result_df = pd.DataFrame(results)
 	output_cols = get_output_columns(mode, use_regtools)
 	ordered_cols = [c for c in output_cols if c in result_df.columns]
-	#ordered_cols = [c for c in OUTPUT_COLUMNS_sc if c in result_df.columns]
 	extra_cols = [c for c in result_df.columns if c not in ordered_cols]
 	result_df[ordered_cols].to_csv(
 		f"{base}.junctScope.txt",
@@ -2493,11 +2717,28 @@ def merge_sample_best_jxn(
 
 
 
+
+
+
+
+
+
 def merge_sample_best_bcd_jxn(
 	sample_dir: str,
 	output_file: str = None,
-	loom_file: str = None
+	loom_file: str = None,
+	bam_file: str = None,
+	bcd_qc: bool = False,
+	threads: int = 1,
+	bcd_tag: str = None,
+	umi_tag: str = None,
+	reference_fasta: str = None,
 ) -> pd.DataFrame:
+# def merge_sample_best_bcd_jxn(
+#   sample_dir: str,
+#   output_file: str = None,
+#   loom_file: str = None
+# ) -> pd.DataFrame:
 	sample_dir = str(Path(sample_dir).resolve())
 	sample_name = Path(sample_dir).name
 	if output_file is None:
@@ -2508,15 +2749,16 @@ def merge_sample_best_bcd_jxn(
 	pattern = str(Path(sample_dir) / "*" /f"*.*.sam.jxn.bcd.best.tsv")
 	files = sorted(glob_files(pattern))
 	per_jxn_dfs = []
+	jxn_names = []
 	ID_COLS = {"cell_barcode","sample_name"}
 	for fpath in files:
 		fpath = str(Path(fpath).resolve())
-		#df = pd.read_csv(fpath, sep="\t") ####
 		df = pd.read_csv(fpath, sep="\t", dtype={"cell_barcode": "string"})
 		if df.empty:
 			continue
 		df["cell_barcode"] = df["cell_barcode"].fillna("NO_BARCODE").astype(str) ####
 		jxn_name = Path(fpath).parts[-2]
+		jxn_names.append(jxn_name)
 		df.insert(loc = 4, column = 'sample_name', value = sample_name)
 		df = df.drop(columns=['chromosome','junction_start','junction_end'])
 		df.columns = df.columns.str.replace(r'_per_barcode|_bcd', '', regex=True)
@@ -2531,7 +2773,6 @@ def merge_sample_best_bcd_jxn(
 		print("[merge_sample_best_bcd_jxn] No data found — check that sample has been run "
 			  f"and that sample_dir is correct:\n  {sample_dir}")
 		return pd.DataFrame()
-	#sample_jxn_summ = reduce(lambda left, right: pd.merge(left, right, how='outer'), per_jxn_dfs)
 	sample_jxn_summ = reduce(
 		lambda left, right: pd.merge(
 			left,
@@ -2541,8 +2782,62 @@ def merge_sample_best_bcd_jxn(
 		),
 		per_jxn_dfs
 	)
-	numeric_cols = sample_jxn_summ.select_dtypes(include=[np.number]).columns
-	sample_jxn_summ[numeric_cols] = sample_jxn_summ[numeric_cols].fillna(0)
+	if bcd_qc:
+		if bam_file is not None:
+			barcode_totals_file = os.path.join(
+				sample_dir,
+				f"{sample_name}_barcode_read_totals.tsv",
+			)
+			barcode_totals = count_barcode_read_totals(
+				input_file=bam_file,
+				sample_name=sample_name,
+				threads=threads,
+				bcd_tag=bcd_tag,
+				umi_tag=umi_tag,
+				reference_fasta=reference_fasta,
+				output_file=barcode_totals_file,
+			)
+			if not barcode_totals.empty:
+				# Using barcode_totals as the left table retains barcodes that
+				# have no reads supporting any requested junction.
+				sample_jxn_summ = barcode_totals.merge(
+					sample_jxn_summ,
+					on=["cell_barcode", "sample_name"],
+					how="left",
+					validate="one_to_one",
+				)
+	numeric_cols = sample_jxn_summ.select_dtypes(
+		include=[np.number]
+	).columns
+	sample_jxn_summ[numeric_cols] = (
+		sample_jxn_summ[numeric_cols].fillna(0)
+	)
+	if "total_reads_per_barcode" in sample_jxn_summ.columns:
+		total_reads = (
+			sample_jxn_summ["total_reads_per_barcode"]
+			.replace(0, np.nan)
+		)
+		for jxn_name in dict.fromkeys(jxn_names):
+			read_col = f"{jxn_name}_reads"
+			seq_read_col = f"{jxn_name}_seq_reads"
+			if read_col in sample_jxn_summ.columns:
+				sample_jxn_summ[
+					f"{jxn_name}_pct_reads_of_total"
+				] = (
+					100
+					* sample_jxn_summ[read_col]
+					/ total_reads
+				).fillna(0).round(6)
+			if seq_read_col in sample_jxn_summ.columns:
+				sample_jxn_summ[
+					f"{jxn_name}_pct_seq_reads_of_total"
+				] = (
+					100
+					* sample_jxn_summ[seq_read_col]
+					/ total_reads
+				).fillna(0).round(6)
+	#numeric_cols = sample_jxn_summ.select_dtypes(include=[np.number]).columns
+	#sample_jxn_summ[numeric_cols] = sample_jxn_summ[numeric_cols].fillna(0)
 	if loom_file is not None:
 		sample_jxn_summ = add_loom_intron_exon_ratio(
 			loom_file=loom_file,
@@ -2552,7 +2847,8 @@ def merge_sample_best_bcd_jxn(
 	sample_jxn_summ.to_csv(output_file, sep="\t", index=False)
 	print(f"[merge_sample_best_bcd_jxn] {sample_name}: {len(sample_jxn_summ)} barcode rows "
 		f"from {len(per_jxn_dfs)} junctions(s) → {output_file}")
-	return sample_jxn_summ ####
+	return sample_jxn_summ
+
 
 
 def merge_fullJxn_bcd_best(
@@ -2702,7 +2998,7 @@ def merge_bcd_best(
 			# Suffix cell_barcode with sample name
 			df.insert(loc = 4, column = 'sample_name', value = sample_name)
 			# df["cell_barcode"] = (
-			# 	df["cell_barcode"].astype(str) + "_" + sample_name
+			#   df["cell_barcode"].astype(str) + "_" + sample_name
 			# )
 			df = df.drop(columns=['chromosome','junction_start','junction_end'])
 			df.columns = df.columns.str.replace(r'_per_barcode|_bcd', '', regex=True)
@@ -3052,15 +3348,20 @@ def _render_exc_script(
 	merge_block = (
 		f"""
 from junctionScope import merge_sample_best_bcd_jxn
-merge_sample_best_bcd_jxn(os.path.join({repr(output)}, "Intermediate", sample), loom_file = loom_file)
+merge_sample_best_bcd_jxn(os.path.join({repr(output)}, "Intermediate", sample),
+	loom_file = loom_file,
+	bam_file=bam_file,
+	bcd_qc = False,
+	threads=threads,
+	reference_fasta=fasta)
 """
 		if mode == "sc"
 		else ""
 	)
 	# if loom_file:
-	# 	print(f"[107] loom_file: {loom_file!r}")
-	# 	print(f"[107] loom exists: {Path(loom_file).exists() if loom_file else False}")
-	# 	print(f"[107] loom size: {Path(loom_file).stat().st_size if loom_file and Path(loom_file).exists() else 'NA'}")
+	#   print(f"[107] loom_file: {loom_file!r}")
+	#   print(f"[107] loom exists: {Path(loom_file).exists() if loom_file else False}")
+	#   print(f"[107] loom size: {Path(loom_file).stat().st_size if loom_file and Path(loom_file).exists() else 'NA'}")
 	return f"""#!/usr/bin/env python3
 \"\"\"Auto-generated runner for sample {sample}.\"\"\"
 import sys, os
@@ -3160,15 +3461,15 @@ print(f"[{{sample}}] all junctions complete.")
 def _render_summary_script(output: str, jxn_list: list, regtools: bool = False, mode: str = 'sc', qc_step: bool = False) -> str:
 	"""Render the Python source for the cross-sample summary script."""
 	# if regtools and validate_regtools():
-	# 	if mode == 'sc':
-	# 		header = "\t".join(OUTPUT_COLUMNS_sc)
-	# 	else:
-	# 		header = "\t".join(OUTPUT_COLUMNS_bulk)
+	#   if mode == 'sc':
+	#       header = "\t".join(OUTPUT_COLUMNS_sc)
+	#   else:
+	#       header = "\t".join(OUTPUT_COLUMNS_bulk)
 	# else:
-	# 	if mode == 'sc':
-	# 		header = "\t".join(OUTPUT_COLUMNS_noReg_sc)
-	# 	else:
-	# 		header = "\t".join(OUTPUT_COLUMNS_noReg_bulk)
+	#   if mode == 'sc':
+	#       header = "\t".join(OUTPUT_COLUMNS_noReg_sc)
+	#   else:
+	#       header = "\t".join(OUTPUT_COLUMNS_noReg_bulk)
 	header = "\t".join(get_output_columns(mode, regtools))
 	output_abs = str(Path(output).resolve())
 	qc_block = (
@@ -3338,7 +3639,7 @@ Examples:
 	# ── Shared helper: run all junctions for one sample ─────────────────────
 	def _run_one(sample, bam_file, jxn_list, loom_file):
 		bam_abs    = str(Path(bam_file).resolve())
-		loom_abs    = str(Path(loom_file).resolve())
+		loom_abs = str(Path(loom_file).resolve()) if loom_file else None
 		fasta   = config_main["fasta"]
 		buffer  = int(config_main["buffer"])
 		threads = int(config_main["threads"])
@@ -3399,7 +3700,12 @@ Examples:
 			# print(f"[107] loom_file: {loom_abs!r}")
 			# print(f"[107] loom exists: {Path(loom_abs).exists() if loom_abs else False}")
 			# print(f"[107] loom size: {Path(loom_abs).stat().st_size if loom_abs and Path(loom_abs).exists() else 'NA'}")
-			merge_sample_best_bcd_jxn(os.path.join(proj_name, "Intermediate", sample), loom_file = loom_abs)
+			merge_sample_best_bcd_jxn(os.path.join(proj_name, "Intermediate", sample),
+				loom_file = loom_abs,
+				bam_file=bam_file,
+				bcd_qc = False,
+				threads=threads,
+				reference_fasta=fasta)
 		# Bug I: "summaries" was unquoted bare name
 		if qc_step:
 			merge_qc_within_sample(
@@ -3431,7 +3737,7 @@ Examples:
 		else:
 			print(f"[main] WARNING: {bam_file} not found — skipping {sample}")
 	result = subprocess.run(
-	    [sys.executable, os.path.join(config_main["proj_name"],'junctScopeSummarize.py')], capture_output=True, text=True
+		[sys.executable, os.path.join(config_main["proj_name"],'junctScopeSummarize.py')], capture_output=True, text=True
 	)
 	# Access the script's output and errors
 	print("Output:", result.stdout)
