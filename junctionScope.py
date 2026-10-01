@@ -2428,13 +2428,6 @@ def run_sample_junction(
 		reg_df = read_anno_as_df(reg_anno)
 		# Match SAM summary to regtools annotation
 		reg_jxn_coord = "NA"
-		# if not sam_summ.empty and not reg_df.empty:
-		#     merged = match_sam_to_regtools(sam_summ, reg_df,
-		#         coord_tol=config_func['match_sam_to_regtools'].get('coord_tol',1))
-		#     merged.to_csv(f"{base}.sam_reg.merged.tsv", sep="\t", index=False)
-		#     # Best regtools match: closest coordinate to the SAM best junction
-		#     matched = merged[merged["junction_match"]]
-		# Gene-level junction summary from regtools
 		gene_summ = get_jxn_counts_gene(reg_df, gene)
 	while empty_summ_trigg < 1:
 		# ------------------------------------------------------------------
@@ -2445,7 +2438,7 @@ def run_sample_junction(
 		print(f"  [{step_n}/{step_count}] Extracting region {jxncoord} ...")
 		extract_jxn_region(bam_file, jxncoord, region_sam,
 			buffer=config_func['extract_jxn_region'].get('buffer',200),
-			threads=threads) # bug7
+			threads=threads)
 		# ------------------------------------------------------------------
 		# 2. Parse SAM to DataFrame
 		# -----------------------------------------------------------------
@@ -2456,10 +2449,6 @@ def run_sample_junction(
 			print("[EMPTY] Parsed SAM is empty. Writing NA result.")
 			empty_summ_trigg += 1
 			break
-			# return write_empty_result(
-			#     sample, gene, jxn_name, gene_region, jxncoord,
-			#     nt_seq, base, mode, use_regtools
-			# )
 		parsed.to_csv(f"{base}.region.parsed.tsv", sep="\t", index=False)
 		# ------------------------------------------------------------------
 		# 3. Filter to junction coordinates + sequence check
@@ -2476,10 +2465,6 @@ def run_sample_junction(
 			print("[EMPTY] Filtered junction table is empty. Writing NA result.")
 			empty_summ_trigg += 1
 			break
-			# return write_empty_result(
-			#     sample, gene, jxn_name, gene_region, jxncoord,
-			#     nt_seq, base, mode, use_regtools
-			# )
 		filtered.to_csv(f"{base}.region.filtered.tsv", sep="\t", index=False)
 		# ------------------------------------------------------------------
 		# 4. Summarise — sample level and per-barcode level
@@ -2491,10 +2476,6 @@ def run_sample_junction(
 			print("[EMPTY] Junction summary is empty. Writing NA result.")
 			empty_summ_trigg += 1
 			break
-			# return write_empty_result(
-			#     sample, gene, jxn_name, gene_region, jxncoord,
-			#     nt_seq, base, mode, use_regtools
-			# )
 		sam_summ.to_csv(f"{base}.sam.jxn.summ.tsv", sep="\t", index=False)
 		#if len(sam_summ) > 1:
 		# now get the 'best' junction no matter what, even if only 1 option and print out result and save to best'
@@ -2551,40 +2532,6 @@ def run_sample_junction(
 					(bcd_summ["junction_end"]   == top["junction_end"])
 				].copy()
 				bcd_summ_best.to_csv(f"{base}.sam.jxn.bcd.best.tsv", sep="\t", index=False)
-	# QC --------------------
-	# if qc_step:
-	#   print(f"  [{step_n}/{step_count}] Sample QC {jxncoord} ...")
-	#   step_n += 1
-	#   qc_dict = count_sample_stats(
-	#       input_file = bam_file,
-	#       mode = mode,
-	#       verbose = True,
-	#       threads = threads,
-	#       reference_fasta = fasta
-	#   )
-	#   sample_junc_qc(best,qc_dict,f"{base}.jxn.qc.tsv",mode)
-	# ------------------------------------------------------------------
-	# 5. regtools extract + annotate (gene-level)
-	# ------------------------------------------------------------------
-	# if regtools and validate_regtools():
-	#     print(f"  [{step_n}/{step_count}] Running regtools ...")
-	#     step_n += 1
-	#     reg_bed  = f"{base}.gene.bed"
-	#     reg_anno = f"{base}.gene.bed.anno"
-	#     extract_jxn_regtools(bam_file, gene_region, reg_bed,
-	#         buffer=config_func['extract_jxn_regtools'].get('buffer',1000))
-	#     annotate_jxn_regtools(reg_bed, fasta, gtf, reg_anno)
-	#     reg_df = read_anno_as_df(reg_anno)
-	#     # Match SAM summary to regtools annotation
-	#     reg_jxn_coord = "NA"
-	#     if not sam_summ.empty and not reg_df.empty:
-	#         merged = match_sam_to_regtools(sam_summ, reg_df,
-	#             coord_tol=config_func['match_sam_to_regtools'].get('coord_tol',1))
-	#         merged.to_csv(f"{base}.sam_reg.merged.tsv", sep="\t", index=False)
-	#         # Best regtools match: closest coordinate to the SAM best junction
-	#         matched = merged[merged["junction_match"]]
-	#     # Gene-level junction summary from regtools
-	#     gene_summ = get_jxn_counts_gene(reg_df, gene)
 	# ------------------------------------------------------------------
 	# 6. Assemble result row
 	# ------------------------------------------------------------------
@@ -2599,27 +2546,6 @@ def run_sample_junction(
 		"targetJxn_coord": jxncoord,
 		"nt_sequence": nt_seq,
 	})
-	#step_n += 1
-	# base_result = {
-	#     "sample":                   sample,
-	#     "gene":                     gene,
-	#     "jxn_name":                 jxn_name,
-	#     "target_gene_coord":        gene_region,
-	#     "targetJxn_coord":          jxncoord,
-	#     "samtools_jxn_coord":       sam_jxn_coord,
-	#     "nt_sequence":              nt_seq,
-	#     "targetJxn_read_count":     read_count,
-	#     "targetJxn_seq_read_count": seq_read_count,
-	#     "pct_reads_seq":            pct_reads_seq
-	# }
-	# if mode == 'sc':
-	#     base_result.update({
-	#     "targetJxn_cell_count":     cell_count,
-	#     "targetJxn_seq_cell_count": seq_cell_count,
-	#     "pct_cells_seq":            pct_cells_seq,
-	#     "targetJxn_umi_count":      umi_count,
-	#     "targetJxn_seq_umi_count":  seq_umi_count,
-	#     "pct_umi_seq":              pct_umi_seq})
 	if regtools and validate_regtools():
 		base_result.update({
 		"geneJxn_count_mean":       gene_summ["mean_val"],
@@ -2650,26 +2576,6 @@ def run_sample_junction(
 					if col not in base_result and col != "regtools_jxn_coord"
 				}
 				results.append({**base_result, "regtools_jxn_coord": reg_coord, **extra})
-		# matched may be unbound if sam_summ or reg_df was empty
-		# if 'matched' not in dir():
-		#     matched = pd.DataFrame()
-		# if matched.empty and regtools and validate_regtools():
-		#     # No coordinate match — one row with NA regtools coord
-		#     results = [{**base_result, "regtools_jxn_coord": "NA"}]
-		# else:
-		#     results = []
-		#     for _, r in matched.iterrows():
-		#         reg_coord = (
-		#             f"{r['chromosome']}:"
-		#             f"{int(r['junction_start_reg'])}-{int(r['junction_end_reg'])}"
-		#         )
-		#         # Pull in extra regtools columns not already in base_result
-		#         extra = {
-		#             col: r[col]
-		#             for col in matched.columns
-		#             if col not in base_result and col != "regtools_jxn_coord"
-		#         }
-		#         results.append({**base_result, "regtools_jxn_coord": reg_coord, **extra})
 	else:
 		# regtools unavailable — single row, no gene-level stats
 		results = [{**base_result}]

@@ -44,7 +44,7 @@
       "k": 31
     },
     "select_best_junction": {
-      "min_reads": 5,
+      "min_reads": 1,
       "min_seq_reads": 0
     },
     "extract_jxn_regtools": {
