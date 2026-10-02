@@ -2530,6 +2530,7 @@ def run_sample_junction(
 					(bcd_summ["junction_end"]   == top["junction_end"])
 				].copy()
 				bcd_summ_best.to_csv(f"{base}.sam.jxn.bcd.best.tsv", sep="\t", index=False)
+				break
 	# ------------------------------------------------------------------
 	# 6. Assemble result row
 	# ------------------------------------------------------------------
