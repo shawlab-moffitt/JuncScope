@@ -2531,6 +2531,8 @@ def run_sample_junction(
 				].copy()
 				bcd_summ_best.to_csv(f"{base}.sam.jxn.bcd.best.tsv", sep="\t", index=False)
 				break
+		else:
+			break
 	# ------------------------------------------------------------------
 	# 6. Assemble result row
 	# ------------------------------------------------------------------
