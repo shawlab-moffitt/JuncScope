@@ -1476,16 +1476,24 @@ def isoform_prop(
 	data_in[f"{gene}_supporting_reads_per_barcode"] = data_in[[v[0] for v in jxn_dict.values()]].sum(axis=1)
 	data_in[f"{gene}_supporting_seq_reads_per_barcode"] = data_in[[v[1] for v in jxn_dict.values()]].sum(axis=1)
 	for j,r in jxn_dict.items():
-		data_in[f"{j}_pct_supporting_reads_of_total"] = (
+		data_in[f"{j}_pct_supporting_reads_of_total"] = np.where(data_in[f"{gene}_supporting_reads_per_barcode"] > 0,
 			100
 			* data_in[r[0]]
-			/ data_in[f"{gene}_supporting_reads_per_barcode"]
-		).fillna(0).round(6)
-		data_in[f"{j}_pct_supporting_seq_reads_of_total"] = (
+			/ data_in[f"{gene}_supporting_reads_per_barcode"],pd.NA)
+		data_in[f"{j}_pct_supporting_seq_reads_of_total"] = np.where(data_in[f"{gene}_supporting_seq_reads_per_barcode"] > 0,
 			100
 			* data_in[r[1]]
-			/ data_in[f"{gene}_supporting_seq_reads_per_barcode"]
-		).fillna(0).round(6)
+			/ data_in[f"{gene}_supporting_seq_reads_per_barcode"],pd.NA)
+		# data_in.loc[data_in[f"{gene}_supporting_reads_per_barcode"] > 0,f"{j}_pct_supporting_reads_of_total"] = (
+		# 	100
+		# 	* data_in[data_in[f"{gene}_supporting_reads_per_barcode"] > 0,r[0]]
+		# 	/ data_in[data_in[f"{gene}_supporting_reads_per_barcode"] > 0,f"{gene}_supporting_reads_per_barcode"]
+		# ).fillna(0).round(6)
+		# data_in[data_in[f"{gene}_supporting_seq_reads_per_barcode"] > 0,f"{j}_pct_supporting_seq_reads_of_total"] = (
+		# 	100
+		# 	* data_in[data_in[f"{gene}_supporting_seq_reads_per_barcode"] > 0,r[1]]
+		# 	/ data_in[data_in[f"{gene}_supporting_seq_reads_per_barcode"] > 0,f"{gene}_supporting_seq_reads_per_barcode"]
+		# ).fillna(0).round(6)
 	if label_iso_as is not None:
 		if not label_threshhold > 0 and not label_threshhold <= 1:
 			raise ValueError("label_threshhold must be greater than 0 and less than or equal to 1")
@@ -1495,6 +1503,12 @@ def isoform_prop(
 		data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_reads"] = data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_reads"].str.replace('_pct_supporting_reads_of_total', '', regex=False)
 		data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_seq_reads"] = (data_in[cols_to_check_rs] > label_threshhold*100).idxmax(axis=1)
 		data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_seq_reads"] = data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_seq_reads"].str.replace('_pct_supporting_seq_reads_of_total', '', regex=False)
+		data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_reads"] = np.where(data_in[f"{gene}_supporting_reads_per_barcode"] == 0,
+			pd.NA,
+			data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_reads"])
+		data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_seq_reads"] = np.where(data_in[f"{gene}_supporting_seq_reads_per_barcode"] == 0,
+			pd.NA,
+			data_in[f"{label_iso_as}_prop_gt_{label_threshhold}_seq_reads"])
 	if output_path is not None:
 		data_in.to_csv(output_path, sep="\t", index=False)
 	return(data_in)
@@ -2388,6 +2402,21 @@ def run_sample_junction(
 	gene     = jxn_entry["gene"]
 	jxncoord = jxn_entry["junction"]
 	nt_seq   = jxn_entry["nt_seq"]
+	print("[run_sample_junction] Parameters:")
+	print(f"   sample: {sample}")
+	print(f"   bam_file: {bam_file}")
+	print(f"   jxn_name: {jxn_name}")
+	print(f"   gene: {gene}")
+	print(f"   jxncoord: {jxncoord}")
+	print(f"   nt_seq: {nt_seq}")
+	print(f"   output_dir: {output_dir}")
+	print(f"   mode: {mode}")
+	print(f"   gene_region: {gene_region}")
+	print(f"   fasta: {fasta}")
+	print(f"   gtf: {gtf}")
+	print(f"   buffer: {buffer}")
+	print(f"   threads: {threads}")
+	print(f"   regtools: {regtools}")
 	step_count = 5
 	step_count = step_count+1 if use_regtools else step_count
 	#step_count = step_count+1 if qc_step else step_count
